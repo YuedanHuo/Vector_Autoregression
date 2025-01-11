@@ -18,6 +18,7 @@ class GibbsSampler_oldf:
         self.B = None  # B = A @ Pi
         self.Ay = None  # Ay matrix
         self.log_lambdas = np.empty((self.N, self.T))  # log-lambda values
+        #self.volatilities = np.empty((self.T,self.N,self.N))  # Stores volatilities
 
     def initialize(self):
         # Initialize A
@@ -57,6 +58,18 @@ class GibbsSampler_oldf:
             self.y, self.z, self.log_lambdas, self.mu_A, self.Sigma_A, self.Pi
         )
 
+    def update_Pi(self):
+        # Update Pi using its conditional posterior
+
+        #self.volatilities = np.empty((self.T, self.N, self.N))
+        inv_A = solve_triangular(self.A, np.eye(self.A.shape[0]), lower=True)
+        for t in range(self.T):
+            Lambda_t_sr = np.diag(np.exp(0.5 * self.log_lambdas[:, t]))
+            self.volatilities[t, :, :] = inv_A @ Lambda_t_sr
+
+        self.Pi = update_Pi_gibbs(
+            self.y, self.z, self.Pi, self.volatilities, self.p, self.Pi_prior_mean, self.Pi_prior_var, self.Pi_prior_var_inv
+        )
 
     def update_Pi_corrected(self):
         self.Pi  = update_Pi_corrected(self.Ay, self.z, self.Pi, self.log_lambdas, self.p, self.A, self.Pi_prior_mean, self.Pi_prior_var_inv)
@@ -71,26 +84,36 @@ class GibbsSampler_oldf:
 
         self.log_lambdas = np.log(lambda_new)
 
+    def updata_phi(self):
+      self.phi = compute_posterior_phi(self.log_lambdas, df_phi = self.N+2 )
+
     def run(self, num_iterations):
         # Run the Gibbs sampler for a specified number of iterations
         self.initialize()
         self.samples = {
             "A": [],
             "Pi": [],
-            "log_lambdas": []
+            "log_lambdas": [],
+            'phi': []
         }
 
         for _ in tqdm(range(num_iterations)):
+            #cProfile.run('self.update_A()')  # Profiling the A update
+            #cProfile.run('self.update_Pi()')  # Profiling the Pi update
+            #cProfile.run('self.update_log_lambdas()')
             self.update_A()
             self.Ay = (self.A @ self.y.T).T
             self.B = self.A @ self.Pi
             self.update_log_lambdas()
             self.update_Pi_corrected()
             self.B = self.A @ self.Pi  # Update B after each iteration
+            self.updata_phi()
 
             # Store samples
             self.samples["A"].append(self.A.copy())
             self.samples["Pi"].append(self.Pi.copy())
             self.samples["log_lambdas"].append(self.log_lambdas.copy())
+            self.samples["phi"].append(self.phi.copy())
 
         return self.samples
+
