@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 class BayesianVARPrior:
-    def __init__(self, y, p=1, sigma_0=2.31, threshold=0.5):
+    def __init__(self, y, p=1, sigma_0=2.31, threshold=0.5, phi_1 = 20, phi_2 = 1.5):
         """
         Class to set up the prior for the Bayesian VAR model.
 
@@ -19,6 +19,8 @@ class BayesianVARPrior:
         self.sigma_0 = sigma_0
         self.threshold = threshold
         self.T, self.N = y.shape
+        self.phi_1 = phi_1
+        self.phi_2 = phi_2
 
 
     def compute_persistence(self):
@@ -53,6 +55,7 @@ class BayesianVARPrior:
             sigma_squared[i] = np.var(residuals, ddof=1)  # Unbiased variance estimate
 
         return sigma_squared
+
 
     def setup_Pi_prior_mean(self):
         """
@@ -116,6 +119,7 @@ class BayesianVARPrior:
         self.Z, self.y = self.construct_Z_matrix()
 
         self.sigma_squared = self.compute_sigma_i_squared()
+
         self.Pi_1_prior_mean, _ = self.compute_persistence()
         self.Pi_prior_mean = self.setup_Pi_prior_mean()
         Pi_prior_var_rows, Pi_prior_var_rows_inv = self.setup_Pi_prior_var()
@@ -139,5 +143,8 @@ class BayesianVARPrior:
             'sigma_0': sigma_0,
             # use this to be the long run mean of AR(1) process of volatility
             'mu_volatility': self.sigma_squared,
+            'phi_1' : self.phi_1,
+            'phi_2': self.phi_2,
+
         }
 

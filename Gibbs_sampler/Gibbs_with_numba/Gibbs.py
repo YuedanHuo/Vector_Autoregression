@@ -2,16 +2,12 @@ import numpy as np
 from statsmodels.tsa.api import VAR
 import tqdm
 import sys
+from A_update_numba import compute_posterior_A_with_log_lambdas_numba
+from Phi_update import compute_posterior_phi_numba
+from CSMC import CSMC, run_csmc_full_numba
+from APi_update import update_APi_numba
 sys.path.append('/Users/hildahuo/Desktop/course registraition/research project/VAR/var python code/Gibbs_sampler')
-#from A_update import compute_posterior_A_with_log_lambdas_vectorized as compute_posterior_A_with_log_lambdas
-from A_update import compute_posterior_A_with_log_lambdas
-from update_phi import compute_posterior_phi
 from SMC import SMC
-sys.path.append('/Users/hildahuo/Desktop/course registraition/research project/VAR/var python code/Gibbs_sampler/CSMC_gibbs')
-from CSMC_bs import CSMC
-sys.path.append('/Users/hildahuo/Desktop/course registraition/research project/VAR/var python code/Gibbs_sampler/APi_Gibbs')
-from Update_APi import update_APi
-
 
 from scipy.linalg import solve_triangular
 from statsmodels.tsa.api import VAR
@@ -59,21 +55,19 @@ class GibbsSampler_API:
 
         #try initalize Pi by fitting a non-bayesian model
         #so as to stablize residuals
-        #model = VAR(self.y)
-        #results = model.fit(self.p)
+        model = VAR(self.y)
+        results = model.fit(self.p)
 
         # Extract lag coefficients and reshape
-        #lag_coeffs = results.coefs.transpose(1, 0, 2).reshape(self.N, -1)  # Shape (N, N*lags)
+        lag_coeffs = results.coefs.transpose(1, 0, 2).reshape(self.N, -1)  # Shape (N, N*lags)
 
         # Extract intercept
-        #intercept = results.intercept.reshape(self.N, 1)  # Shape (N, 1)
+        intercept = results.intercept.reshape(self.N, 1)  # Shape (N, 1)
 
         # Combine intercept and lag coefficients
-        #Pi_init = np.hstack([intercept, lag_coeffs])  # Final shape (N, N*lags + 1)
-        
-        # use prior mean as init 
-        self.Pi = self.Pi_prior_mean.copy()
+        Pi_init = np.hstack([intercept, lag_coeffs])  # Final shape (N, N*lags + 1)
 
+        self.Pi = Pi_init
         self.B = self.A @ self.Pi
         self.Ay = (self.A @ self.y.T).T
 
@@ -88,13 +82,13 @@ class GibbsSampler_API:
 
     def update_A(self):
         # Update A using its conditional posterior
-        self.A = compute_posterior_A_with_log_lambdas(
+        self.A = compute_posterior_A_with_log_lambdas_numba(
             self.y, self.z, self.log_lambdas, self.mu_A, self.Sigma_A, self.Pi
         )
 
 
     def update_Pi(self, first_iter):
-        self.Pi  = update_APi(self.Ay, self.z, self.Pi, self.log_lambdas, self.p, self.A, self.Pi_prior_mean, self.Pi_prior_var_inv,first_iter)
+        self.Pi  = update_APi_numba(self.Ay, self.z, self.Pi, self.log_lambdas, self.p, self.A, self.Pi_prior_mean, self.Pi_prior_var_inv,first_iter)
 
     def update_log_lambdas(self):
         # Update log-lambdas using CSMC
@@ -102,24 +96,34 @@ class GibbsSampler_API:
         ancestors_new = np.zeros((self.Num,self.N, self.T))
         trejactories_new = np.zeros((self.Num,self.N, self.T))
         for j in range(self.N):
-            csmc = CSMC(
+            #csmc = CSMC(
+            #    Num=self.Num,
+            #    phi=self.phi,
+            #    sigma0=self.sigma0,
+            #    y= self.Ay,
+            #    z=self.z,
+            #    B=self.B,
+            #    j=j,
+            #    fixed_particles=self.log_lambdas[j, :],
+            #)
+            #trejactories_new[:,j,:], ancestors_new[:,j,:], log_lambda_new[j, :], _, _ = csmc.run()
+            # Note: Pass only the specific slices needed (e.g. Phi_i[k] instead of Phi_i)
+            trejactories_new[:,j,:], ancestors_new[:,j,:], log_lambda_new[j, :], _, _ = run_csmc_full_numba(
                 Num=self.Num,
-                phi=self.phi,
+                phi_val=self.phi[j],         # Pass scalar
                 sigma0=self.sigma0,
-                y= self.Ay,
+                y_col= self.Ay[:, j],        # Pass specific column as 1D array
                 z=self.z,
-                B=self.B,
-                j=j,
+                B_row=self.B[j, :],        # Pass specific row as 1D array
                 fixed_particles=self.log_lambdas[j, :],
+                ESSmin=0.5
             )
-            trejactories_new[:,j,:], ancestors_new[:,j,:], log_lambda_new[j, :], _, _ = csmc.run()
-            #self.ESS.append(ess)
         self.log_lambdas = log_lambda_new
         self.ancestors = ancestors_new
         self.trejactories = trejactories_new
 
     def update_phi(self):
-      self.phi = compute_posterior_phi(self.log_lambdas, df_phi = self.N+2)
+      self.phi = compute_posterior_phi_numba(self.log_lambdas, df_phi_vec = self.N+2 * np.ones(self.N), K=self.N)
 
     def run(self, num_iterations, skip_init = False):
         # Run the Gibbs sampler for a specified number of iteration

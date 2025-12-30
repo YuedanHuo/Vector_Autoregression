@@ -1,3 +1,5 @@
+import numpy as np
+
 # initialize the mixture gaussian distribution
 K = 7
 m_list = np.array([-10.12999,-3.97281,-8.56686,2.77786,0.61942,1.79518,-1.08819]) - 1.2704

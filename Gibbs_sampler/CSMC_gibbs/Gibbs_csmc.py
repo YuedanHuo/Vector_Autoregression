@@ -78,19 +78,6 @@ class GibbsSampler:
         )
 
     def update_Pi(self):
-        # Update Pi using its conditional posterior
-
-        #self.volatilities = np.empty((self.T, self.N, self.N))
-        inv_A = solve_triangular(self.A, np.eye(self.A.shape[0]), lower=True)
-        for t in range(self.T):
-            Lambda_t_sr = np.diag(np.exp(0.5 * self.log_lambdas[:, t]))
-            self.volatilities[t, :, :] = inv_A @ Lambda_t_sr
-
-        self.Pi = update_Pi_gibbs(
-            self.y, self.z, self.Pi, self.volatilities, self.p, self.Pi_prior_mean, self.Pi_prior_var, self.Pi_prior_var_inv
-        )
-
-    def update_Pi_corrected(self):
         self.Pi  = update_Pi_corrected(self.Ay, self.z, self.Pi, self.log_lambdas, self.p, self.A, self.Pi_prior_mean, self.Pi_prior_var_inv)
 
     def update_log_lambdas(self):
@@ -129,8 +116,7 @@ class GibbsSampler:
             self.Ay = (self.A @ self.y.T).T
             self.B = self.A @ self.Pi
             self.update_log_lambdas()
-            #self.update_Pi()
-            self.update_Pi_corrected()
+            self.update_Pi()
             self.B = self.A @ self.Pi  # Update B after each iteration
             self.update_phi()
 

@@ -10,7 +10,7 @@ class CSMC:
     the Particle Gibbs (PG) algorithm.
     """
     
-    def __init__(self, Num, phi, sigma0, y, z, B, j, fixed_particles, ESSmin=0.5):
+    def __init__(self, Num, phi, sigma0, y, z, B, j, fixed_particles, mu = 0, rho = 1, ESSmin=0.5):
         """
         Initializes the CSMC filter with model parameters, data, and the conditioning trajectory.
 
@@ -38,11 +38,13 @@ class CSMC:
         self.ESSmin = ESSmin  # ESS threshold for adaptive resampling
         self.T = self.y.shape[0] # Total number of time steps
 
+        self.mu = mu # the long run mean of the AR1 process of valatility
+        self.rho = rho
+
+
         # --- Internal State and History ---
         # Stores the full paths of all particles. Shape: (Num, T)
         self.trajectories = np.zeros((Num, len(fixed_particles)))
-        # store the full weights to save CPU for backward sampling
-        self.all_weights = np.zeros((Num, len(fixed_particles)))
         # Stores the ancestor index for each particle at each time step after resampling.
         self.ancestors = np.zeros((Num, len(fixed_particles)), dtype=int)
         # Stores the cumulative log weights of the particles.
@@ -121,7 +123,9 @@ class CSMC:
         """
         # Propagate all particles (except the first) with random walk noise.
         noise = np.random.normal(0, self.phi[self.j]**0.5, size=self.Num)
-        self.particles[1:] += noise[1:]
+
+        # add the AR1 process here
+        self.particles[1:] = self.rho * (self.particles[1:] - self.mu) + self.mu + noise[1:]
         
         # --- This is the key step for Conditional SMC ---
         # Force the first particle to follow the predefined trajectory.
@@ -132,7 +136,6 @@ class CSMC:
         
         # Store the updated particle values in the trajectory history.
         self.trajectories[:, t] = self.particles
-
 
     def backward_sampling(self):
         """
@@ -149,8 +152,7 @@ class CSMC:
         sampled_ancestor = np.zeros(self.T, dtype=int)
 
         # 1. Sample the final particle at time T-1 from the final weighted distribution.
-        #log_w = self.compute_log_weights(self.particles, self.T - 1)
-        log_w = self.all_weights[:, -1]
+        log_w = self.compute_log_weights(self.particles, self.T - 1)
         weights = np.exp(log_w - np.max(log_w))
         weights /= weights.sum()
         sampled_index = np.searchsorted(np.cumsum(weights), np.random.rand(1))[0]
@@ -161,8 +163,7 @@ class CSMC:
         for t in range(self.T - 2, -1, -1):
             # Get particles and their original weights at time t.
             particles_t = self.trajectories[:, t]
-            #log_weights_t = self.compute_log_weights(particles_t, t)
-            log_weights_t = self.all_weights[:, t]
+            log_weights_t = self.compute_log_weights(particles_t, t)
             
             # Get the already-sampled particle at the next time step.
             particle_next = sampled_trajectory[t + 1]
@@ -209,7 +210,6 @@ class CSMC:
         """
         # 1. Initialize particles and their weights at t=0.
         self.initialize_particles()
-        ESS = []
 
         # 2. Main loop: Iterate through time steps t=0 to T-1.
         for t in range(self.T):
@@ -217,17 +217,14 @@ class CSMC:
             self.ancestors[:, t] = np.arange(self.Num)
             
             # Check ESS and resample if it falls below the threshold.
-            ess = self.compute_ESS()
-            ESS.append(ess)
-            if ess < self.ESSmin * self.Num:
-                indices = self.resample(t) # ancestor updated in the resampling function
+            if self.compute_ESS() < self.ESSmin * self.Num:
+                indices = self.resample(t)
 
             # 3. Propagate particles to the next state.
             self.update_particles(t)
 
             # 4. Compute new log-weights and add them to the cumulative weights.
             log_weights = self.compute_log_weights(self.particles, t)
-            self.all_weights[:, t] = log_weights
             self.weights += log_weights
             
         # Optional final resampling step (for SMC Square)
@@ -237,7 +234,7 @@ class CSMC:
         # 5. Perform backward sampling to get a single path.
         sampled_trajectory, sampled_ancestor = self.backward_sampling()
 
-        return self.trajectories, self.ancestors, sampled_trajectory, sampled_ancestor, self.weights#, ESS
+        return self.trajectories, self.ancestors, sampled_trajectory, sampled_ancestor, self.weights
 
     def reconstruct_path(self, trajectories, ancestors, final_indices):
         """

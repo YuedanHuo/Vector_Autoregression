@@ -10,6 +10,9 @@ from SMC import SMC
 sys.path.append('/Users/hildahuo/Desktop/course registraition/research project/VAR/var python code/Gibbs_sampler/MH_gibbs')
 from Lambda_update import sample_lambdas
 
+import tracemalloc
+tracemalloc.start()
+
 class GibbsSampler_oldf:
     def __init__(self, y, z, mu_A, Sigma_A, Pi_prior_mean, Pi_prior_var, Pi_prior_var_inv, phi, sigma0, T, N, p, Num=30):
         self.y = y  # Observations
@@ -93,7 +96,8 @@ class GibbsSampler_oldf:
             "A": [],
             "Pi": [],
             "log_lambdas": [],
-            'phi': []
+            'phi': [],
+            'memory_usage': [], # add to track memory usage
         }
 
         for _ in tqdm.tqdm(range(num_iterations)):
@@ -113,6 +117,10 @@ class GibbsSampler_oldf:
             self.samples["Pi"].append(self.Pi.copy())
             self.samples["log_lambdas"].append(self.log_lambdas.copy())
             self.samples["phi"].append(self.phi.copy())
+
+                        # Track memory usage at each (t,k) step.
+            current, peak = tracemalloc.get_traced_memory()
+            self.samples['memory_usage'].append(current / 1e6) # Log in MB.
 
         return self.samples
 

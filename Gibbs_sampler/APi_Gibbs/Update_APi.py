@@ -29,7 +29,7 @@ def check_pi_stability(pi_matrix, N, p):
     
     print(f"Maximum eigenvalue modulus: {max_eigenvalue}")
     
-    return max_eigenvalue < 1
+    return max_eigenvalue < 1, max_eigenvalue
 
 
 def update_APi (Ay, z, Pi, log_lambdas, lags, A, prior_mean, inv_prior_var, first_iter = False):
@@ -53,34 +53,33 @@ def update_APi (Ay, z, Pi, log_lambdas, lags, A, prior_mean, inv_prior_var, firs
     k = z.shape[1]
     Pi = np.zeros((N,k))
     
-    # do rejection sampling to ensure that we have a stable Pi
-    # in the sense that all eigenvalues < 1
-    Pi_instability = True
-    while Pi_instability: 
-      for j in range(N):
-        # Initialize prior precision and the data term (X'X)
-        prior_prec = inv_prior_var[j]  # Inverse of the prior variance, also the conditional variance
+    for j in range(N):
+      # Initialize prior precision and the data term (X'X)
+      prior_prec = inv_prior_var[j]  # Inverse of the prior variance, also the conditional variance
         
-        # calculate the posterior covariance
-        scale_factor = 1 / np.exp(log_lambdas[j, :])
-        weighted_z = z * scale_factor[:, None]  # broadcasting over columns
-        data_prec = weighted_z.T @ z
-        post_prec = data_prec + prior_prec
-        post_prec += np.eye(post_prec.shape[0]) * 1e-6  # Regularization
-        post_cov = np.linalg.pinv(post_prec)
+      # calculate the posterior covariance
+      scale_factor = 1 / np.exp(log_lambdas[j, :])
+      weighted_z = z * scale_factor[:, None]  # broadcasting over columns
+      data_prec = weighted_z.T @ z
+      post_prec = data_prec + prior_prec
+      post_prec += np.eye(post_prec.shape[0]) * 1e-6  # Regularization
+      #post_cov = np.linalg.pinv(post_prec)
+      L = np.linalg.cholesky(post_prec)
+      post_cov = np.linalg.solve(L.T, np.linalg.solve(L, np.eye(k)))
 
-        # calculate the conditional prior
-        prev_contrib = A[j,:j] @ Pi[:j, :]
-        con_prior_mean = prior_mean[j] + prev_contrib
-        data_contrib = weighted_z.T @ Ay[:, j]
-        post_mean = prior_prec @ con_prior_mean + data_contrib  ## potential issue with the prior_prec here
-        post_mean = post_cov @ post_mean
 
-        # Sample from the posterior distribution for the j-th row of APi
-        APi= np.random.multivariate_normal(post_mean, post_cov)
-        Pi[j,:] = APi - prev_contrib
-      Pi_instability = not check_pi_stability(Pi,N,lags)
-      if first_iter : 
-        Pi_instability = False # skip the rejection sampling step for the prior initialization
+      # calculate the conditional prior
+      prev_contrib = A[j,:j] @ Pi[:j, :]
+      con_prior_mean = prior_mean[j] + prev_contrib
+      data_contrib = weighted_z.T @ Ay[:, j]
+      post_mean = prior_prec @ con_prior_mean + data_contrib  ## potential issue with the prior_prec here
+      post_mean = post_cov @ post_mean
+
+      # Sample from the posterior distribution for the j-th row of APi
+      #APi= np.random.multivariate_normal(post_mean, post_cov)
+      L = np.linalg.cholesky(post_cov) # use chol decompostion for faster computation
+      APi = post_mean + L @ np.random.randn(k)
+      Pi[j,:] = APi - prev_contrib
+
 
     return Pi

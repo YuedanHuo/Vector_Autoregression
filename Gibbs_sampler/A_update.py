@@ -55,3 +55,50 @@ def compute_posterior_A_with_log_lambdas(y, z, log_lambdas, mu_A, Sigma_A, Pi):
       A_draw[j,:j] = np.random.multivariate_normal(mu_A_new, Sigma_A_new)
 
     return A_draw
+
+
+import numpy as np
+
+def compute_posterior_A_with_log_lambdas_vectorized(y, z, log_lambdas, mu_A, Sigma_A, Pi):
+    """
+    Compute posterior draw for A in a VAR with heteroskedastic errors.
+    A is assumed lower-triangular with ones on the diagonal.
+    """
+
+    T, N = y.shape
+    A_draw = np.eye(N)
+    y_tilde = y - z @ Pi.T  # (T, N)
+
+    for j in range(1, N):
+        # Regressor part (only previous variables since A is lower-triangular)
+        y_tilde_j = y_tilde[:, :j]  # (T, j)
+
+        # Prior precision and prior mean (restricted to dimension j)
+        Sigma_A_j = Sigma_A[:j, :j]
+        prec_prior = np.linalg.solve(Sigma_A[:j,:j], np.eye(j))
+        mean_prior = mu_A[:j]
+
+        # Compute observation precision weights
+        w = np.exp(-log_lambdas[j, :])  # (T,)
+
+        # Weighted cross-product
+        # Σ_t w_t y_t y_t' = (Y' diag(w) Y)
+        YW = y_tilde_j * np.sqrt(w)[:, None]
+        prec_lik = YW.T @ YW  # (j, j)
+
+        # Posterior precision and covariance
+        prec_post = prec_prior + prec_lik
+        # Small regularization for numerical stability
+        prec_post += 1e-8 * np.eye(j)
+        Sigma_A_new = np.linalg.solve(prec_post, np.eye(j))
+        Sigma_A_new = 0.5 * (Sigma_A_new + Sigma_A_new.T)
+
+        # Posterior mean
+        mu_post = prec_prior @ mean_prior + y_tilde_j.T @ (w * np.ones_like(w))
+        mu_post = Sigma_A_new @ mu_post
+
+        #Sample A[j, :j] ~ N(mu_post, Sigma_A_new)
+        #A_draw[j, :j] = mu_post + np.linalg.cholesky(Sigma_A_new +  1e-8 * np.eye(j)) @ np.random.randn(j)
+        A_draw[j,:j] = np.random.multivariate_normal(mu_post, Sigma_A_new)
+
+    return A_draw
